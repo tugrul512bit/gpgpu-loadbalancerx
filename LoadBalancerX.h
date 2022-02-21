@@ -150,6 +150,18 @@ namespace LoadBalanceLib
 			ns.push_back(elapsedTotal);
 
 		}
+
+		// returns percentage of total system performance
+		std::vector<double> getRelativePerformancesOfDevices()
+		{
+			std::vector<double> result;
+			size_t sz=performances.size();
+			for(size_t i=0;i<sz;i++)
+			{
+				result.push_back(performances[i]*100.0);
+			}
+			return result;
+		}
 	private:
 		std::vector<ComputeDevice<State>> devices;
 		std::vector<GrainOfWork<State>> totalWork;
