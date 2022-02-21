@@ -27,6 +27,14 @@ Simple load-balancing library for balancing (gpugpu or other) workloads between 
 		lb.run();
 	}
 
+	std::cout<<"performance ratios:"<<std::endl;
+	auto performances = lb.getRelativePerformancesOfDevices();
+	for(int i=0;i<performances.size();i++)
+	{
+		std::cout<<performances[i]<<"% ";
+	}
+	std::cout<<std::endl;
+	
 	for(int i=0;i<output.size();i++)
 	{
 		std::cout<<output[i]<<std::endl;
@@ -36,6 +44,9 @@ Simple load-balancing library for balancing (gpugpu or other) workloads between 
 output:
 
 ```
+performance ratios:
+27.0191% 20.3538% 16.5624% 13.829% 11.8639% 10.3718% 
+
 work:0 gpu:0
 work:1 gpu:0
 work:2 gpu:0
