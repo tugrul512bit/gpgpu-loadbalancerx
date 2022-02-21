@@ -19,7 +19,7 @@ int main() {
 		lb.addWork(LoadBalanceLib::GrainOfWork<int>([&,i](int gpu){
 
 			// simulating different GPUs (high-end = less sleep)
-			std::this_thread::sleep_for(std::chrono::milliseconds(gpu+3));
+			std::this_thread::sleep_for(std::chrono::milliseconds(gpu*10+30));
 			output[i]=std::string("work:")+std::to_string(i)+std::string(" gpu:")+std::to_string(gpu);
 		}));
 	}
