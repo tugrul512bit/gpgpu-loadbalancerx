@@ -1,7 +1,6 @@
 //============================================================================
 // Name        : test.cpp
 // Author      : Tugrul
-// Description : tests for load balancing between compute devices
 //============================================================================
 
 #include <iostream>
