@@ -89,7 +89,8 @@ namespace LoadBalanceLib
 				performances.push_back(1.0f/totDev);
 				nsDev.push_back(1);
 				grainDev.push_back(1);
-				nDev.push_back(0);
+
+				startDev.push_back(0);
 			}
 
 
@@ -102,49 +103,77 @@ namespace LoadBalanceLib
 				performances[i]=perf;
 			}
 
+			size_t ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
 				performances[i]/=totPerf;
-				nDev[i]=performances[i]*totWrk;
+				grainDev[i]=performances[i]*totWrk;
+				ct+=grainDev[i];
+			}
+
+			// if all devices have 0 work or num work < num device
+			if(ct < totWrk)
+				grainDev[0]+=totWrk-ct;
+
+			ct=0;
+			for(size_t i=0;i<totDev;i++)
+			{
+				startDev[i]=ct;
+				ct+=grainDev[i];
 
 			}
+
 
 
 			if(ns.size()>5)
 				ns.erase(ns.begin());
 
-			size_t elapsedTotal;
-			size_t totalWorkCtr=0;
-			size_t selectedDevice=0;
 
-			for(auto & g:grainDev)
-			{
-				g=0;
-			}
+
+
 			for(auto & n:nsDev)
 			{
 				n=0;
 			}
 
+
+
+			size_t elapsedTotal;
 			{
 				Bench bench(&elapsedTotal);
-				for(auto w:totalWork)
+
+				// parallel run for real work & time measurement
+				std::vector<std::thread> thr;
+				for(size_t i=0; i<totDev; i++)
 				{
-					size_t elapsedDevice;
-					{
-						Bench benchDevice(&elapsedDevice);
-						w.run(devices[selectedDevice].getState());
-					}
-					nsDev[selectedDevice]+=elapsedDevice;
-					grainDev[selectedDevice]++;
-					totalWorkCtr++;
-					if(totalWorkCtr == nDev[selectedDevice])
-					{
-						totalWorkCtr=0;
-						selectedDevice++;
-						if(selectedDevice==totDev)
-							selectedDevice -= totDev;
-					}
+					// todo: optimize with dedicated threads
+					thr.push_back(std::thread([&,i](){
+						size_t elapsedDevice;
+						if(grainDev[i]>0)
+						{
+							Bench benchDevice(&elapsedDevice);
+							const size_t first = startDev[i];
+							const size_t last = first+grainDev[i];
+							for(size_t j=first; j<last; j++)
+							{
+
+								totalWork[j].run(devices[i].getState());
+							}
+						}
+						else
+						{
+							elapsedDevice=-1; // max size_t nanoseconds
+						}
+						nsDev[i]=elapsedDevice;
+					}));
+
+
+				}
+
+				for(size_t i=0; i<totDev; i++)
+				{
+					if(thr[i].joinable())
+						thr[i].join();
 				}
 			}
 			ns.push_back(elapsedTotal);
@@ -168,7 +197,8 @@ namespace LoadBalanceLib
 		std::vector<size_t> ns;
 		std::vector<size_t> nsDev;
 		std::vector<size_t> grainDev;
-		std::vector<size_t> nDev;
+		std::vector<size_t> startDev;
+
 		std::vector<double> performances;
 	};
 
