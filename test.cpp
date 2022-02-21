@@ -35,6 +35,14 @@ int main() {
 		lb.run();
 	}
 
+	std::cout<<"performance ratios:"<<std::endl;
+	auto performances = lb.getRelativePerformancesOfDevices();
+	for(int i=0;i<performances.size();i++)
+	{
+		std::cout<<performances[i]<<"% ";
+	}
+	std::cout<<std::endl;
+
 	for(int i=0;i<output.size();i++)
 	{
 		std::cout<<output[i]<<std::endl;
