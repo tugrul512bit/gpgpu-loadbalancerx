@@ -11,7 +11,7 @@ for(int i=0;i<20;i++)
 	lb.addWork(LoadBalanceLib::GrainOfWork<int>([&,i](int gpu){
 
 		// simulating different GPUs (high-end = less sleep)
-		std::this_thread::sleep_for(std::chrono::milliseconds(gpu+3));
+		std::this_thread::sleep_for(std::chrono::milliseconds(gpu*10+30));
 		output[i]=std::string("work:")+std::to_string(i)+std::string(" gpu:")+std::to_string(gpu);
 	}));
 }
@@ -45,27 +45,26 @@ output:
 
 ```
 performance ratios:
-27.0191% 20.3538% 16.5624% 13.829% 11.8639% 10.3718% 
-
+27.3246% 20.5234% 16.4381% 13.6901% 11.7424% 10.2815% 
 work:0 gpu:0
 work:1 gpu:0
 work:2 gpu:0
 work:3 gpu:0
 work:4 gpu:0
-work:5 gpu:1
-work:6 gpu:1
+work:5 gpu:0
+work:6 gpu:0
 work:7 gpu:1
 work:8 gpu:1
-work:9 gpu:2
-work:10 gpu:2
+work:9 gpu:1
+work:10 gpu:1
 work:11 gpu:2
-work:12 gpu:3
-work:13 gpu:3
-work:14 gpu:4
-work:15 gpu:4
-work:16 gpu:5
-work:17 gpu:5
-work:18 gpu:0
-work:19 gpu:0
+work:12 gpu:2
+work:13 gpu:2
+work:14 gpu:3
+work:15 gpu:3
+work:16 gpu:4
+work:17 gpu:4
+work:18 gpu:5
+work:19 gpu:5
 
 ```
