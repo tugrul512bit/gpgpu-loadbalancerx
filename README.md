@@ -1,5 +1,5 @@
 # gpgpu-loadbalancerx
-Simple load-balancing library for balancing gpugpu workloads between gpus or any devices in a computer.
+Simple load-balancing library for balancing (gpugpu or other) workloads between gpus (or any devices) in a computer.
 ```C++
 	std::vector<std::string> output(20);
 
