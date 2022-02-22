@@ -15,6 +15,11 @@ What can device be?
 - Anything that needs some temporary state (to be used for grain computation)
 
 How does it work?
+- User adds devices with state objects or values
+- User adds work grains to be repeated in each run() call
+- Load balancer sends grains to devices and runs them with state information given by their devices
+- Load balancer synchronizes all devices and returns to user with run-time minimization optimization for the next run() call
+- After several repeats, it converges to a fair work distribution depending on performances of devices
 
 ![work](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
 
