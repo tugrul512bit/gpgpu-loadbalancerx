@@ -14,6 +14,10 @@ What can device be?
 - Object instance that holds I/O arrays for a GPU/FPGA/another CPU
 - Anything that needs some temporary state (to be used for grain computation)
 
+How does it work?
+
+[](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
+
 ```C++
 std::vector<std::string> output(20);
 
