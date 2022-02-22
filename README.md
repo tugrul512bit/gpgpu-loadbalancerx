@@ -1,18 +1,18 @@
 # gpgpu-loadbalancerx
-	Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). 
+Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). 
 
-	On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 40 microseconds(for FX8150 CPU + 7 devices) but grains that are sent to devices should be taking enough time to benefit from run-time minimization optimization. 
+On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 40 microseconds(for FX8150 CPU + 7 devices) but grains that are sent to devices should be taking enough time to benefit from run-time minimization optimization. 
 	
-	What can grain be?
-	- Computation kernel for single 16x16 tile of an image, processed by 256 CUDA threads + its data transmissions over PCI-e
-	- Sending work to another computer and waiting for response by any means
-	- Anything that can be run in serial or parallel as long as it completes its own task within its scope
+What can grain be?
+- Computation kernel for single 16x16 tile of an image, processed by 256 CUDA threads + its data transmissions over PCI-e
+- Sending work to another computer and waiting for response by any means
+- Anything that can be run in serial or parallel as long as it completes its own task within its scope
 	
-	What can device be?
-	- Device settings to launch a kernel such as OpenCL context handle for a GPU-id
-	- CUDA GPU-id
-	- Object instance that holds I/O arrays for a GPU/FPGA/another CPU
-	- Anything that needs some temporary state (to be used for grain computation)
+What can device be?
+- Device settings to launch a kernel such as OpenCL context handle for a GPU-id
+- CUDA GPU-id
+- Object instance that holds I/O arrays for a GPU/FPGA/another CPU
+- Anything that needs some temporary state (to be used for grain computation)
 
 ```C++
 std::vector<std::string> output(20);
