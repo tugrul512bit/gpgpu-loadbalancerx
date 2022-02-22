@@ -1,5 +1,6 @@
 # gpgpu-loadbalancerx
-Simple load-balancing library for balancing (gpugpu or other) workloads between gpus (or any devices) in a computer.
+Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer. On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). Response time per run call is less than 100 microseconds so kernels that are sent to gpus should be taking enough time to benefit from run-time minimization optimization. 
+
 ```C++
 std::vector<std::string> output(20);
 
