@@ -17,6 +17,7 @@ What can device be?
 How does it work?
 
 ![work](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
+(image created in https://app.diagrams.net/)
 
 ```C++
 std::vector<std::string> output(20);
