@@ -1,14 +1,19 @@
 # gpgpu-loadbalancerx
-Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer. On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). Response time per run call is less than 100 microseconds so kernels that are sent to gpus should be taking enough time to benefit from run-time minimization optimization. 
+Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). Response time per run call is less than 100 microseconds so kernels that are sent to gpus should be taking enough time to benefit from run-time minimization optimization. 
 
 ```C++
 std::vector<std::string> output(20);
 
+// template parameter "State" (int below) can be any copyable class that contains any device-specific setting data such as GPU-identification for launching kernels
+// for CUDA, it could be GPU-id, for an OpenCL wrapper it could be a context handle (created for each GPU) of a GPU
+// for a cluster, it could be a networking function-object that sends data to other computers
 LoadBalanceLib::LoadBalancerX<int> lb;
 
 
 for(int i=0;i<20;i++)
 {
+	// load balancer selects necessary devices and feeds their "state" data to the selected work grain 
+	// here it is just a simulated GPU-id value as integer
 	lb.addWork(LoadBalanceLib::GrainOfWork<int>([&,i](int gpu){
 
 		// simulating different GPUs (high-end = less sleep)
