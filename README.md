@@ -16,7 +16,7 @@ What can device be?
 
 How does it work?
 
-[](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
+![work](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
 
 ```C++
 std::vector<std::string> output(20);
