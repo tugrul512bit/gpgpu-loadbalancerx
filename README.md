@@ -54,6 +54,8 @@ lb.addDevice(LoadBalanceLib::ComputeDevice<int>(5));
 
 for(int i=0;i<10;i++)
 {
+	// on every iteration of i, it gets better in fair distribution of grains to devices
+	// stronger devices receive more and more grains until the optimization converges
 	lb.run();
 }
 
