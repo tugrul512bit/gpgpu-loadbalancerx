@@ -65,6 +65,28 @@ namespace LoadBalanceLib
 		State state;
 	};
 
+	template
+	<typename State>
+	class FieldBlock
+	{
+	public:
+		std::vector<ComputeDevice<State>> devices;
+		std::vector<GrainOfWork<State>> totalWork;
+		std::vector<size_t> ns;
+		std::vector<size_t> nsDev;
+		std::vector<size_t> grainDev;
+		std::vector<size_t> startDev;
+		std::vector<std::thread> thr;
+		std::vector<double> performances;
+		std::vector<std::shared_ptr<std::mutex>> mut;
+		std::vector<bool> running;
+		std::vector<bool> hasWork;
+		std::vector<bool> workComplete;
+		std::shared_ptr<std::mutex> mutGlobal;
+		bool initialized;
+		std::vector<std::shared_ptr<std::condition_variable>> cond;
+	};
+
 	// GPGPU load balancing tool
 	// distributes work between different graphics cards
 	// in a way that minimizes total computation time
@@ -73,80 +95,81 @@ namespace LoadBalanceLib
 	class LoadBalancerX
 	{
 	public:
-		LoadBalancerX():mutGlobal(std::make_shared<std::mutex>()),initialized(false)
+		LoadBalancerX() // mutGlobal(std::make_shared<std::mutex>()),initialized(false)
 		{
-
+			fields=std::make_shared<FieldBlock<State>>();
+			fields->mutGlobal=std::make_shared<std::mutex>();
 		}
 
 		~LoadBalancerX()
 		{
 
-			for(size_t i=0; i<thr.size(); i++)
+			for(size_t i=0; i<fields->thr.size(); i++)
 			{
 
 				{
-					std::unique_lock<std::mutex> lg(*(mutGlobal));
-					running[i]=false;
-					initialized=true;
-					hasWork[i]=false;
+					std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
+					fields->running[i]=false;
+					fields->initialized=true;
+					fields->hasWork[i]=false;
 				}
 
 				{
 
-					std::unique_lock<std::mutex> lg(*(mut[i]));
-					running[i]=false;
-					initialized=true;
-					hasWork[i]=false;
+					std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+					fields->running[i]=false;
+					fields->initialized=true;
+					fields->hasWork[i]=false;
 				}
 
 			}
 
-			for(size_t i=0; i<thr.size(); i++)
+			for(size_t i=0; i<fields->thr.size(); i++)
 			{
 
-				cond[i]->notify_one();
-				thr[i].join();
+				fields->cond[i]->notify_one();
+				fields->thr[i].join();
 
 			}
 		}
 
 		void addWork(GrainOfWork<State> work)
 		{
-			std::unique_lock<std::mutex> lg(*(mutGlobal));
-			totalWork.push_back(work);
+			std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
+			fields->totalWork.push_back(work);
 		}
 		void addDevice(ComputeDevice<State> devPrm)
 		{
 			size_t indexThr;
 			{
-				std::unique_lock<std::mutex> lg(*(mutGlobal));
-				initialized=false;
+				std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
+				fields->initialized=false;
 
-				indexThr = thr.size();
+				indexThr = fields->thr.size();
 
-				mut.push_back(std::make_shared<std::mutex>());
-				cond.push_back(std::make_shared<std::condition_variable>());
+				fields->mut.push_back(std::make_shared<std::mutex>());
+				fields->cond.push_back(std::make_shared<std::condition_variable>());
 				{
-					std::unique_lock<std::mutex> lg(*(mut[indexThr]));
-					devices.push_back(devPrm);
-					running.push_back(true);
-					hasWork.push_back(false);
-					workComplete.push_back(true);
+					std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
+					fields->devices.push_back(devPrm);
+					fields->running.push_back(true);
+					fields->hasWork.push_back(false);
+					fields->workComplete.push_back(true);
 
-					performances.push_back(1.0);
-					nsDev.push_back(1);
-					grainDev.push_back(1);
-					startDev.push_back(0);
+					fields->performances.push_back(1.0);
+					fields->nsDev.push_back(1);
+					fields->grainDev.push_back(1);
+					fields->startDev.push_back(0);
 				}
 
 			}
 
-			thr.push_back(std::thread([&,indexThr](){
+			fields->thr.push_back(std::thread([&,indexThr](){
 
 				State state;
 				{
-					std::unique_lock<std::mutex> lg(*(mut[indexThr]));
-					state = devices[indexThr].getState();
+					std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
+					state = fields->devices[indexThr].getState();
 				}
 				bool isRunning = true;
 				bool hasWrk = false;
@@ -158,8 +181,8 @@ namespace LoadBalanceLib
 				while(!init)
 				{
 					{
-						std::unique_lock<std::mutex> lg(*(mutGlobal));
-						init=initialized;
+						std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
+						init=fields->initialized;
 					}
 				}
 
@@ -170,20 +193,20 @@ namespace LoadBalanceLib
 
 					if(globalSyncDone)
 					{
-						std::unique_lock<std::mutex> lg(*(mut[indexThr]));
-						isRunning = running[indexThr];
-						hasWrk = hasWork[indexThr];
-						start = startDev[indexThr];
-						grain = grainDev[indexThr];
+						std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
+						isRunning = fields->running[indexThr];
+						hasWrk = fields->hasWork[indexThr];
+						start = fields->startDev[indexThr];
+						grain = fields->grainDev[indexThr];
 					}
 					else
 					{
-						std::unique_lock<std::mutex> lg(*(mutGlobal));
+						std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
 						globalSyncDone=true;
-						isRunning = running[indexThr];
-						hasWrk = hasWork[indexThr];
-						start = startDev[indexThr];
-						grain = grainDev[indexThr];
+						isRunning = fields->running[indexThr];
+						hasWrk = fields->hasWork[indexThr];
+						start = fields->startDev[indexThr];
+						grain = fields->grainDev[indexThr];
 					}
 
 
@@ -200,26 +223,26 @@ namespace LoadBalanceLib
 								const size_t last = first+grain;
 								for(size_t j=first; j<last; j++)
 								{
-									totalWork[j].run(state);
+									fields->totalWork[j].run(state);
 								}
 							}
 						}
 
 						{
-							std::unique_lock<std::mutex> lg(*(mut[indexThr]));
-							workComplete[indexThr]=true;
-							hasWork[indexThr]=false;
-							nsDev[indexThr]=elapsedDevice;
-							cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
+							std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
+							fields->workComplete[indexThr]=true;
+							fields->hasWork[indexThr]=false;
+							fields->nsDev[indexThr]=elapsedDevice;
+							fields->cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
 						}
 
 					}
 					else
 					{
-						std::unique_lock<std::mutex> lg(*(mut[indexThr]));
-						workComplete[indexThr]=true;
-						hasWork[indexThr]=false;
-						cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
+						std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
+						fields->workComplete[indexThr]=true;
+						fields->hasWork[indexThr]=false;
+						fields->cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
 					}
 
 				}
@@ -231,53 +254,53 @@ namespace LoadBalanceLib
 		{
 
 			{
-				std::unique_lock<std::mutex> lg(*(mutGlobal));
-				initialized=true;
+				std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
+				fields->initialized=true;
 			}
-			const size_t totWrk = totalWork.size();
-			const size_t totDev = devices.size();
+			const size_t totWrk = fields->totalWork.size();
+			const size_t totDev = fields->devices.size();
 
 
 			// compute real performance
 			double totPerf = 0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				double perf = (grainDev[i]+0.1)/(double)nsDev[i];
+				double perf = (fields->grainDev[i]+0.1)/(double)fields->nsDev[i];
 				totPerf+=perf;
-				performances[i]=perf;
+				fields->performances[i]=perf;
 			}
 
 			size_t ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				std::unique_lock<std::mutex> lg(*(mut[i]));
-				performances[i]/=totPerf;
-				grainDev[i]=performances[i]*totWrk;
-				ct+=grainDev[i];
+				std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+				fields->performances[i]/=totPerf;
+				fields->grainDev[i]=fields->performances[i]*totWrk;
+				ct+=fields->grainDev[i];
 			}
 
 			// if all devices have 0 work or num work < num device
 			size_t ctct=0;
 			while(ct < totWrk)
 			{
-				std::unique_lock<std::mutex> lg(*(mut[ctct%totDev]));
-				grainDev[ctct%totDev]++;
+				std::unique_lock<std::mutex> lg(*(fields->mut[ctct%totDev]));
+				fields->grainDev[ctct%totDev]++;
 				ct++;ctct++;
 			}
 
 			ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				std::unique_lock<std::mutex> lg(*(mut[i]));
-				startDev[i]=ct;
-				ct+=grainDev[i];
+				std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+				fields->startDev[i]=ct;
+				ct+=fields->grainDev[i];
 
 			}
 
 
 
-			if(ns.size()>5)
-				ns.erase(ns.begin());
+			if(fields->ns.size()>5)
+				fields->ns.erase(fields->ns.begin());
 
 
 
@@ -289,33 +312,33 @@ namespace LoadBalanceLib
 				// parallel run for real work & time measurement
 				for(size_t i=0; i<totDev; i++)
 				{
-					// todo: optimize with dedicated threads
-					if(grainDev[i]>0)
+
+					if(fields->grainDev[i]>0)
 					{
-						std::unique_lock<std::mutex> lg(*(mut[i]));
-						hasWork[i]=true;
-						workComplete[i]=false;
-						cond[i]->notify_one();
+						std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+						fields->hasWork[i]=true;
+						fields->workComplete[i]=false;
+						fields->cond[i]->notify_one();
 					}
 				}
 
 				for(size_t i=0; i<totDev; i++)
 				{
-					if(grainDev[i]>0)
+					if(fields->grainDev[i]>0)
 					{
 
 						bool finish = false;
 						while(!finish)
 						{
-							cond[i]->notify_one();
-							std::unique_lock<std::mutex> lg(*(mut[i]));
-							finish = workComplete[i];
+							fields->cond[i]->notify_one();
+							std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+							finish = fields->workComplete[i];
 							std::this_thread::yield();
 						}
 					}
 				}
 			}
-			ns.push_back(elapsedTotal);
+			fields->ns.push_back(elapsedTotal);
 
 		}
 
@@ -323,31 +346,16 @@ namespace LoadBalanceLib
 		std::vector<double> getRelativePerformancesOfDevices()
 		{
 			std::vector<double> result;
-			size_t sz=performances.size();
+			size_t sz=fields->performances.size();
 			for(size_t i=0;i<sz;i++)
 			{
-				std::unique_lock<std::mutex> lg(*(mut[i]));
-				result.push_back(performances[i]*100.0);
+				std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+				result.push_back(fields->performances[i]*100.0);
 			}
 			return result;
 		}
 	private:
-
-		std::vector<ComputeDevice<State>> devices;
-		std::vector<GrainOfWork<State>> totalWork;
-		std::vector<size_t> ns;
-		std::vector<size_t> nsDev;
-		std::vector<size_t> grainDev;
-		std::vector<size_t> startDev;
-		std::vector<std::thread> thr;
-		std::vector<double> performances;
-		std::vector<std::shared_ptr<std::mutex>> mut;
-		std::vector<bool> running;
-		std::vector<bool> hasWork;
-		std::vector<bool> workComplete;
-		std::shared_ptr<std::mutex> mutGlobal;
-		bool initialized;
-		std::vector<std::shared_ptr<std::condition_variable>> cond;
+		std::shared_ptr<FieldBlock<State>> fields;
 	};
 
 }
