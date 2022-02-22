@@ -14,7 +14,7 @@
 #include<chrono>
 #include<memory>
 #include<mutex>
-
+#include<condition_variable>
 
 namespace LoadBalanceLib
 {
@@ -80,48 +80,54 @@ namespace LoadBalanceLib
 
 		~LoadBalancerX()
 		{
+
 			for(size_t i=0; i<thr.size(); i++)
 			{
+
 				{
-					std::lock_guard<std::mutex> lg(*(mutGlobal));
+					std::unique_lock<std::mutex> lg(*(mutGlobal));
 					running[i]=false;
 					initialized=true;
+					hasWork[i]=false;
 				}
 
 				{
 
-					std::lock_guard<std::mutex> lg(*(mut[i]));
+					std::unique_lock<std::mutex> lg(*(mut[i]));
 					running[i]=false;
 					initialized=true;
+					hasWork[i]=false;
 				}
 
 			}
 
 			for(size_t i=0; i<thr.size(); i++)
 			{
-				if(thr[i].joinable())
-					thr[i].join();
+
+				cond[i]->notify_one();
+				thr[i].join();
+
 			}
 		}
 
 		void addWork(GrainOfWork<State> work)
 		{
-			std::lock_guard<std::mutex> lg(*(mutGlobal));
+			std::unique_lock<std::mutex> lg(*(mutGlobal));
 			totalWork.push_back(work);
 		}
 		void addDevice(ComputeDevice<State> devPrm)
 		{
 			size_t indexThr;
 			{
-				std::lock_guard<std::mutex> lg(*(mutGlobal));
+				std::unique_lock<std::mutex> lg(*(mutGlobal));
 				initialized=false;
 
 				indexThr = thr.size();
 
 				mut.push_back(std::make_shared<std::mutex>());
-
+				cond.push_back(std::make_shared<std::condition_variable>());
 				{
-					std::lock_guard<std::mutex> lg(*(mut[indexThr]));
+					std::unique_lock<std::mutex> lg(*(mut[indexThr]));
 					devices.push_back(devPrm);
 					running.push_back(true);
 					hasWork.push_back(false);
@@ -139,7 +145,7 @@ namespace LoadBalanceLib
 
 				State state;
 				{
-					std::lock_guard<std::mutex> lg(*(mut[indexThr]));
+					std::unique_lock<std::mutex> lg(*(mut[indexThr]));
 					state = devices[indexThr].getState();
 				}
 				bool isRunning = true;
@@ -152,7 +158,7 @@ namespace LoadBalanceLib
 				while(!init)
 				{
 					{
-						std::lock_guard<std::mutex> lg(*(mutGlobal));
+						std::unique_lock<std::mutex> lg(*(mutGlobal));
 						init=initialized;
 					}
 				}
@@ -161,26 +167,26 @@ namespace LoadBalanceLib
 				while(isRunning)
 				{
 
-					{
-						if(globalSyncDone)
-						{
-							std::lock_guard<std::mutex> lg(*(mut[indexThr]));
-							isRunning = running[indexThr];
-							hasWrk = hasWork[indexThr];
-							start = startDev[indexThr];
-							grain = grainDev[indexThr];
-						}
-						else
-						{
-							std::lock_guard<std::mutex> lg(*(mutGlobal));
-							globalSyncDone=true;
-							isRunning = running[indexThr];
-							hasWrk = hasWork[indexThr];
-							start = startDev[indexThr];
-							grain = grainDev[indexThr];
-						}
 
+					if(globalSyncDone)
+					{
+						std::unique_lock<std::mutex> lg(*(mut[indexThr]));
+						isRunning = running[indexThr];
+						hasWrk = hasWork[indexThr];
+						start = startDev[indexThr];
+						grain = grainDev[indexThr];
 					}
+					else
+					{
+						std::unique_lock<std::mutex> lg(*(mutGlobal));
+						globalSyncDone=true;
+						isRunning = running[indexThr];
+						hasWrk = hasWork[indexThr];
+						start = startDev[indexThr];
+						grain = grainDev[indexThr];
+					}
+
+
 
 					if(hasWrk)
 					{
@@ -200,21 +206,32 @@ namespace LoadBalanceLib
 						}
 
 						{
-							std::lock_guard<std::mutex> lg(*(mut[indexThr]));
+							std::unique_lock<std::mutex> lg(*(mut[indexThr]));
 							workComplete[indexThr]=true;
+							hasWork[indexThr]=false;
 							nsDev[indexThr]=elapsedDevice;
+							cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
 						}
 
 					}
+					else
+					{
+						std::unique_lock<std::mutex> lg(*(mut[indexThr]));
+						workComplete[indexThr]=true;
+						hasWork[indexThr]=false;
+						cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
+					}
 
 				}
+
 			}));
 		}
 
 		void run()
 		{
+
 			{
-				std::lock_guard<std::mutex> lg(*(mutGlobal));
+				std::unique_lock<std::mutex> lg(*(mutGlobal));
 				initialized=true;
 			}
 			const size_t totWrk = totalWork.size();
@@ -233,7 +250,7 @@ namespace LoadBalanceLib
 			size_t ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				std::lock_guard<std::mutex> lg(*(mut[i]));
+				std::unique_lock<std::mutex> lg(*(mut[i]));
 				performances[i]/=totPerf;
 				grainDev[i]=performances[i]*totWrk;
 				ct+=grainDev[i];
@@ -243,7 +260,7 @@ namespace LoadBalanceLib
 			size_t ctct=0;
 			while(ct < totWrk)
 			{
-				std::lock_guard<std::mutex> lg(*(mut[ctct%totDev]));
+				std::unique_lock<std::mutex> lg(*(mut[ctct%totDev]));
 				grainDev[ctct%totDev]++;
 				ct++;ctct++;
 			}
@@ -251,7 +268,7 @@ namespace LoadBalanceLib
 			ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				std::lock_guard<std::mutex> lg(*(mut[i]));
+				std::unique_lock<std::mutex> lg(*(mut[i]));
 				startDev[i]=ct;
 				ct+=grainDev[i];
 
@@ -273,19 +290,28 @@ namespace LoadBalanceLib
 				for(size_t i=0; i<totDev; i++)
 				{
 					// todo: optimize with dedicated threads
-					std::lock_guard<std::mutex> lg(*(mut[i]));
-					hasWork[i]=true;
-					workComplete[i]=false;
+					if(grainDev[i]>0)
+					{
+						std::unique_lock<std::mutex> lg(*(mut[i]));
+						hasWork[i]=true;
+						workComplete[i]=false;
+						cond[i]->notify_one();
+					}
 				}
 
 				for(size_t i=0; i<totDev; i++)
 				{
-					bool finish = false;
-					while(!finish)
+					if(grainDev[i]>0)
 					{
-						std::lock_guard<std::mutex> lg(*(mut[i]));
-						finish = workComplete[i];
-						std::this_thread::yield();
+
+						bool finish = false;
+						while(!finish)
+						{
+							cond[i]->notify_one();
+							std::unique_lock<std::mutex> lg(*(mut[i]));
+							finish = workComplete[i];
+							std::this_thread::yield();
+						}
 					}
 				}
 			}
@@ -300,7 +326,7 @@ namespace LoadBalanceLib
 			size_t sz=performances.size();
 			for(size_t i=0;i<sz;i++)
 			{
-				std::lock_guard<std::mutex> lg(*(mut[i]));
+				std::unique_lock<std::mutex> lg(*(mut[i]));
 				result.push_back(performances[i]*100.0);
 			}
 			return result;
@@ -321,6 +347,7 @@ namespace LoadBalanceLib
 		std::vector<bool> workComplete;
 		std::shared_ptr<std::mutex> mutGlobal;
 		bool initialized;
+		std::vector<std::shared_ptr<std::condition_variable>> cond;
 	};
 
 }
