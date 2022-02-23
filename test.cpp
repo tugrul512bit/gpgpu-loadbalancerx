@@ -90,13 +90,12 @@ int main() {
 		));
 
 	}
-
-	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({0})); // RTX3050
-	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({1})); // another RTX3050
-	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({2})); // RTX3090
-	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({3})); // maybe a CPU core
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({0})); // RTX3090
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({1})); // RTX3070
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({2})); // RTX3060 with overclock
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({3})); // RTX3060
 	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({4})); // for offloading to a server
-	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({5})); // maybe a big.LITTLE CPU's LITTLE core
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({5})); // maybe some CPU cores
 
 
 
