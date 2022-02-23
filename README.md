@@ -30,6 +30,7 @@ How does it work?
 - After several repeats, it converges to a fair work distribution depending on performances of devices and run-time approaches to optimum level
 
 ![work](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
+![how it works](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/howitworks.png)
 
 (image created in https://app.diagrams.net/)
 
