@@ -1,25 +1,33 @@
 # gpgpu-loadbalancerx
 Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). 
 
-On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 40 microseconds(for FX8150 CPU + 7 devices) but grains that are sent to devices should be taking enough time to benefit from run-time minimization optimization. 
+On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 150 microseconds(for FX8150 CPU + 7 devices) so the grains that are sent to devices should be taking enough time to benefit from run-time minimization optimization and number of grains should be high enough to let load-balancing trade enough grains between devices to minimize run-time. 
 	
-What can grain be?
-- Computation kernel for single 16x16 tile of an image, processed by 256 CUDA threads + its data transmissions over PCI-e
+What can grain state be and what can grain do?
+- Computation kernel for single 16x16 tile of an image, to be processed by 256 CUDA threads + its data transmissions over PCI-e
 - Sending work to another computer and waiting for response by any means
 - Anything that can be run in serial or parallel as long as it completes its own task within its scope
+- Should have asynchronous methods in inputWork, computeWork and outputWork to have optimum performance
+- must synchronize in outputWork function or syncWork function
 	
-What can device be?
+What can device state have?
 - Device settings to launch a kernel such as OpenCL context handle for a GPU-id
 - CUDA GPU-id
-- Object instance that holds I/O arrays for a GPU/FPGA/another CPU
+- Object instance that holds I/O arrays for a GPU/FPGA/another CPU or even some network comm that offloads to a server
 - Anything that needs some temporary state (to be used for grain computation)
 
 How does it work?
 - User adds devices with state objects or values
 - User adds work grains to be repeated in each run() call
-- Load balancer sends grains to devices and runs them with state information given by their devices
-- Load balancer synchronizes all devices and returns to user with run-time minimization optimization for the next run() call
-- After several repeats, it converges to a fair work distribution depending on performances of devices
+- Load balancer creates 1 dedicated CPU thread for each device
+- Load balancer selects a grain and a device
+- - If selected grain was not initialized in selected device, then runs the initWork function
+- - runs inputWork function to copy data from host to device, user should use asynchronous functions inside for performance
+- - runs computeWork function to compute, user should use asynchronous functions inside for performance
+- - runs outputWork function to copy results from device to host, user should use asynchronous functions inside for performance
+- - runs syncWork function to synchronize all previous async work with the host
+- Load balancer synchronizes all dedicated device threads and returns to user with run-time minimization optimization for the next run() call
+- After several repeats, it converges to a fair work distribution depending on performances of devices and run-time approaches to optimum level
 
 ![work](https://github.com/tugrul512bit/gpgpu-loadbalancerx/blob/main/canvas.png)
 
