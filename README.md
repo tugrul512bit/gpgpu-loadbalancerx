@@ -72,8 +72,8 @@ for(int i=0;i<grains;i++)
 				 */
 				if(thisGrain.whichGpuComputedMeLastTime != gpu.gpuId)
 				{
-					thisGrain.cudaInputDevice[gpu.gpuId]=std::vector<float>(5); // simulating a cuda gpu buffer allocation
-					thisGrain.cudaOutputDevice[gpu.gpuId]=std::vector<float>(5); // simulating a cuda gpu buffer allocation
+					thisGrain.cudaInputDevice[gpu.gpuId]=std::vector<float>(pixelsPerGrain); // simulating a cuda gpu buffer allocation
+					thisGrain.cudaOutputDevice[gpu.gpuId]=std::vector<float>(pixelsPerGrain); // simulating a cuda gpu buffer allocation
 					thisGrain.whichGpuComputedMeLastTime = gpu.gpuId;
 				}
 			},
