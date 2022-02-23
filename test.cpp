@@ -4,48 +4,128 @@
 //============================================================================
 
 #include <iostream>
+#include <map>
 using namespace std;
 
 #include "LoadBalancerX.h"
 int main() {
 
-	std::vector<std::string> output(20);
+	// number of chunks in a divide&conquer algorithm
+	const int grains = 1000;
+	const int pixelsPerGrain=5;
 
-	LoadBalanceLib::LoadBalancerX<int> lb;
+	// simulating pixel buffer in host for a GPGPU task
+	std::vector<float> input(grains*pixelsPerGrain);
+	std::vector<float> output(grains*pixelsPerGrain);
 
-
-	for(int i=0;i<20;i++)
+	// simulate an image data
+	for(int i=0;i<grains*pixelsPerGrain;i++)
 	{
-		lb.addWork(LoadBalanceLib::GrainOfWork<int>([&,i](int gpu){
-
-			// simulating different GPUs (high-end = less sleep)
-			std::this_thread::sleep_for(std::chrono::milliseconds(gpu*10+30));
-			output[i]=std::string("work:")+std::to_string(i)+std::string(" gpu:")+std::to_string(gpu);
-		}));
-	}
-	lb.addDevice(LoadBalanceLib::ComputeDevice<int>(0));
-	lb.addDevice(LoadBalanceLib::ComputeDevice<int>(1));
-	lb.addDevice(LoadBalanceLib::ComputeDevice<int>(2));
-	lb.addDevice(LoadBalanceLib::ComputeDevice<int>(3));
-	lb.addDevice(LoadBalanceLib::ComputeDevice<int>(4));
-	lb.addDevice(LoadBalanceLib::ComputeDevice<int>(5));
-
-	for(int i=0;i<10;i++)
-	{
-		lb.run();
+		input[i]=i&255;
 	}
 
-	std::cout<<"performance ratios:"<<std::endl;
-	auto performances = lb.getRelativePerformancesOfDevices();
-	for(int i=0;i<performances.size();i++)
+	// necessary device state information for all types of devices
+	class DeviceState
 	{
-		std::cout<<performances[i]<<"% ";
-	}
-	std::cout<<std::endl;
+	public:
+		int gpuId;
+	};
 
-	for(int i=0;i<output.size();i++)
+	// necessary grain state information
+	class GrainState
+	{
+	public:
+		GrainState():whichGpuComputedMeLastTime(-1){}
+		int whichGpuComputedMeLastTime;
+
+		// just simulating a GPU's video-memory buffer
+		std::map<int,std::vector<float>> cudaInputDevice;
+		std::map<int,std::vector<float>> cudaOutputDevice;
+	};
+
+	// load balancer to distribute grains between devices fairly depending on their performance
+	LoadBalanceLib::LoadBalancerX<DeviceState, GrainState> lb;
+
+
+	for(int i=0;i<grains;i++)
+	{
+		lb.addWork(LoadBalanceLib::GrainOfWork<DeviceState, GrainState>(
+				[&,i](DeviceState gpu, GrainState& thisGrain){
+					/* (async/sync) initialize grain's host/device environment (if necessary),
+					 * called only once for lifetime of LoadBalancerX instance per device
+					 */
+					if(thisGrain.whichGpuComputedMeLastTime != gpu.gpuId)
+					{
+						thisGrain.cudaInputDevice[gpu.gpuId]=std::vector<float>(5); // simulating a cuda gpu buffer allocation
+						thisGrain.cudaOutputDevice[gpu.gpuId]=std::vector<float>(5); // simulating a cuda gpu buffer allocation
+						thisGrain.whichGpuComputedMeLastTime = gpu.gpuId;
+					}
+				},
+				[&,i](DeviceState gpu, GrainState& thisGrain){
+					/* (async) send input data to device (called for every run) */
+					for(int j=0;j<pixelsPerGrain;j++)
+						thisGrain.cudaInputDevice[gpu.gpuId][j]=input[i*pixelsPerGrain + j];
+				},
+				[&,i](DeviceState gpu, GrainState& thisGrain){
+					/* (async) compute GPGPU task in device using input (called for every run) */
+
+					// some simple color computation
+					// (just simulating a cuda kernel)
+					for(int j=0;j<pixelsPerGrain;j++)
+						thisGrain.cudaOutputDevice[gpu.gpuId][j]=0.5f*thisGrain.cudaInputDevice[gpu.gpuId][j];
+				},
+				[&,i](DeviceState gpu, GrainState& thisGrain){
+					/* (async) get results from device to host (called for every run) */
+
+					for(int j=0;j<pixelsPerGrain;j++)
+						output[i*pixelsPerGrain + j] = thisGrain.cudaOutputDevice[gpu.gpuId][j];
+				},
+				[&,i](DeviceState gpu, GrainState& thisGrain){
+					/* (synchronized)synchronize this grain's work (called for every run) */
+
+					// simulating cuda kernel synchronization
+					// simulating different GPUs (bigger gpuId = low-end GPU)
+					std::this_thread::sleep_for(std::chrono::milliseconds(2+gpu.gpuId));
+				}
+		));
+
+	}
+
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({0})); // RTX3050
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({1})); // another RTX3050
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({2})); // RTX3090
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({3})); // maybe a CPU core
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({4})); // for offloading to a server
+	lb.addDevice(LoadBalanceLib::ComputeDevice<DeviceState>({5})); // maybe a big.LITTLE CPU's LITTLE core
+
+
+
+	size_t nano;
+	{
+
+		for(int i=0;i<20;i++)
+		{
+			LoadBalanceLib::Bench bench(&nano);
+			lb.run();
+			std::cout<<nano<<"ns"<<std::endl;
+			std::cout<<"performance ratios:"<<std::endl;
+			auto performances = lb.getRelativePerformancesOfDevices();
+			for(int i=0;i<performances.size();i++)
+			{
+				std::cout<<performances[i]<<"% ";
+			}
+			std::cout<<std::endl;
+		}
+	}
+
+
+
+
+
+	for(int i=0;i<min(25,grains);i++)
 	{
 		std::cout<<output[i]<<std::endl;
 	}
+
 	return 0;
 }
