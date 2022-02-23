@@ -15,6 +15,7 @@
 #include<memory>
 #include<mutex>
 #include<condition_variable>
+#include<map>
 
 namespace LoadBalanceLib
 {
@@ -40,17 +41,85 @@ namespace LoadBalanceLib
 		std::chrono::nanoseconds t1,t2;
 	};
 
-	// single unit of work (i.e. a kernel call + data copy)
+	/* single unit of work (i.e. input copy + kernel call + output copy + sync)
+	 * State: device state that will be given by load balancer to each grain to select which device it is being run
+	 * GrainState: to keep internal states of each grain if necessary
+	 */
 	template
-	<typename State>
+	<typename State, typename GrainState>
 	class GrainOfWork
 	{
 	public:
-		GrainOfWork(){ work=[](State state){ std::this_thread::sleep_for(std::chrono::seconds(1)); }; }
-		GrainOfWork(std::function<void(State)> workPrm){ work=workPrm; }
-		void run(State state){ if(work) work(state);}
+		GrainOfWork():	workInit([](State s, GrainState&){}),
+						workInput([](State s, GrainState&){}),
+						workCompute([](State s, GrainState&){}),
+						workOutput([](State s, GrainState&){}),
+						workSync([](State s, GrainState&){}),
+						initialized(){ }
+
+		/*
+		 * workInitPrm: called only once per lifetime of LoadBalancerX instance, to initialize grain data / data inside device state (per device)
+		 * 				can be synchronized algorithm
+		 * workInputPrm: called on every run() method call of LoadBalancerX instance to load input data into device
+		 * 				user should use asynchronous functions in this for optimal performance
+		 * workComputePrm: called on every run() method call of LoadBalancerX instance to compute data in device
+		 * 				user should use asynchronous functions in this for optimal performance
+		 * workOutputPrm: called on every run() method call of LoadBalancerX instance to save output data from device into host environment
+		 * 				user should use asynchronous functions in this for optimal performance
+		 * workSyncPrm: called on every run() method call of LoadBalancerX instance to synchronize any and all asynchronous work inside
+		 * 				workInputPrm, workComputePrm, workOutputPrm functions
+		 * 				user must synchronize each grain's work either in this function or in any other work__Prm function
+		 * 				this function is only given for extra readability and called last for every run() call for each grain
+		 * grainStatePrm: internal state per grain to be used (if necessary)
+		 */
+		GrainOfWork(std::function<void(State, GrainState&)> workInitPrm,
+					std::function<void(State, GrainState&)> workInputPrm,
+					std::function<void(State, GrainState&)> workComputePrm,
+					std::function<void(State, GrainState&)> workOutputPrm,
+					std::function<void(State, GrainState&)> workSyncPrm
+				): initialized()
+		{
+			workInit=workInitPrm;
+			workInput=workInputPrm;
+			workCompute=workComputePrm;
+			workOutput=workOutputPrm;
+			workSync=workSyncPrm;
+		}
+
+		// called only once for life time
+		void init(State state, GrainState& gState){ if(workInit) workInit(state, gState);}
+		void input(State state, GrainState& gState){ if(workInput) workInput(state, gState);}
+		void compute(State state, GrainState& gState){ if(workCompute) workCompute(state, gState);}
+		void output(State state, GrainState& gState){ if(workOutput) workOutput(state, gState);}
+		void sync(State state, GrainState& gState){ if(workSync) workSync(state, gState);}
+		bool isReady(int deviceIndex){ return initialized.find(deviceIndex) != initialized.end(); }
+		void makeReady(int deviceIndex){ initialized[deviceIndex]=true; }
+
+		GrainState& refGrainState (){ return grainState; }
 	private:
-		std::function<void(State)> work;
+		// called once per lifetime of loadbalancerx per device
+		std::function<void(State, GrainState&)> workInit;
+
+		// called on every run method call of loadbalancerx
+		// to copy input data to device
+		std::function<void(State, GrainState&)> workInput;
+
+		// called on every run method call of loadbalancerx
+		// to compute data in device
+		std::function<void(State, GrainState&)> workCompute;
+
+		// called on every run method call of loadbalancerx
+		// to copy output data from device to host
+		std::function<void(State, GrainState&)> workOutput;
+
+		// called on every run method call of loadbalancerx
+		// to synchronize any and all asynchronized work given inside workInput, workCompute and workOutput
+		// user must synchronize in this unless it is synchronized in other methods
+		std::function<void(State, GrainState&)> workSync;
+
+		std::map<int,bool> initialized;
+
+		GrainState grainState;
 	};
 
 	template
@@ -66,12 +135,12 @@ namespace LoadBalanceLib
 	};
 
 	template
-	<typename State>
+	<typename State, typename GrainState>
 	class FieldBlock
 	{
 	public:
 		std::vector<ComputeDevice<State>> devices;
-		std::vector<GrainOfWork<State>> totalWork;
+		std::vector<GrainOfWork<State, GrainState>> totalWork;
 		std::vector<size_t> ns;
 		std::vector<size_t> nsDev;
 		std::vector<size_t> grainDev;
@@ -91,13 +160,13 @@ namespace LoadBalanceLib
 	// distributes work between different graphics cards
 	// in a way that minimizes total computation time
 	template
-	<typename State>
+	<typename State, typename GrainState>
 	class LoadBalancerX
 	{
 	public:
 		LoadBalancerX() // mutGlobal(std::make_shared<std::mutex>()),initialized(false)
 		{
-			fields=std::make_shared<FieldBlock<State>>();
+			fields=std::make_shared<FieldBlock<State, GrainState>>();
 			fields->mutGlobal=std::make_shared<std::mutex>();
 		}
 
@@ -133,7 +202,7 @@ namespace LoadBalanceLib
 			}
 		}
 
-		void addWork(GrainOfWork<State> work)
+		void addWork(GrainOfWork<State, GrainState> work)
 		{
 			std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
 			fields->totalWork.push_back(work);
@@ -223,7 +292,31 @@ namespace LoadBalanceLib
 								const size_t last = first+grain;
 								for(size_t j=first; j<last; j++)
 								{
-									fields->totalWork[j].run(state);
+									if(!fields->totalWork[j].isReady(indexThr))
+									{
+										fields->totalWork[j].init(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+										fields->totalWork[j].makeReady(indexThr);
+									}
+								}
+
+								for(size_t j=first; j<last; j++)
+								{
+									fields->totalWork[j].input(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+								}
+
+								for(size_t j=first; j<last; j++)
+								{
+									fields->totalWork[j].compute(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+								}
+
+								for(size_t j=first; j<last; j++)
+								{
+									fields->totalWork[j].output(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+								}
+
+								for(size_t j=first; j<last; j++)
+								{
+									fields->totalWork[j].sync(state, fields->totalWork[j].refGrainState()); // user must synchronize in this unless it is synchronized in other methods
 								}
 							}
 						}
@@ -355,7 +448,7 @@ namespace LoadBalanceLib
 			return result;
 		}
 	private:
-		std::shared_ptr<FieldBlock<State>> fields;
+		std::shared_ptr<FieldBlock<State, GrainState>> fields;
 	};
 
 }
