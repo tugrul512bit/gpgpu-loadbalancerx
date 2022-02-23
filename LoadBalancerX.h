@@ -141,7 +141,7 @@ namespace LoadBalanceLib
 	public:
 		std::vector<ComputeDevice<State>> devices;
 		std::vector<GrainOfWork<State, GrainState>> totalWork;
-		std::vector<size_t> ns;
+		std::vector<double> performancesHistory;
 		std::vector<size_t> nsDev;
 		std::vector<size_t> grainDev;
 		std::vector<size_t> startDev;
@@ -168,6 +168,7 @@ namespace LoadBalanceLib
 		{
 			fields=std::make_shared<FieldBlock<State, GrainState>>();
 			fields->mutGlobal=std::make_shared<std::mutex>();
+			runCount=0;
 		}
 
 		~LoadBalancerX()
@@ -343,7 +344,8 @@ namespace LoadBalanceLib
 			}));
 		}
 
-		void run()
+		// returns elapsed time in nanoseconds (this is minimized by load-balancer)
+		size_t run()
 		{
 
 			{
@@ -353,26 +355,58 @@ namespace LoadBalanceLib
 			const size_t totWrk = fields->totalWork.size();
 			const size_t totDev = fields->devices.size();
 
+			const int numSmoothing = 5;
+			const int curHistoryIndex = runCount % numSmoothing;
+			double totPerf = 0;
+			if(fields->performancesHistory.size()<totDev*numSmoothing)
+			{
+				fields->performancesHistory = std::vector<double>(totDev*numSmoothing);
+				for(size_t i=0;i<totDev;i++)
+				{
+					for(int j=0;j<numSmoothing;j++)
+					{
+						fields->performancesHistory[j*totDev + i]=1.0/totDev;
+					}
+				}
+
+			}
 
 			// compute real performance
-			double totPerf = 0;
+			totPerf=0.0f;
 			for(size_t i=0;i<totDev;i++)
 			{
 				double perf = (fields->grainDev[i]+0.1)/(double)fields->nsDev[i];
+
 				totPerf+=perf;
 				fields->performances[i]=perf;
 			}
+
+			runCount++;
 
 			size_t ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
 				std::unique_lock<std::mutex> lg(*(fields->mut[i]));
 				fields->performances[i]/=totPerf;
+
+				// smoothing the performance measurement
+				double smooth = 0.0;
+
+
+				fields->performancesHistory[curHistoryIndex*totDev + i]=fields->performances[i];
+				for(int j=0;j<numSmoothing;j++)
+				{
+					smooth += fields->performancesHistory[j*totDev + i];
+				}
+				smooth /= (double)numSmoothing;
+				fields->performances[i]=smooth;
 				fields->grainDev[i]=fields->performances[i]*totWrk;
 				ct+=fields->grainDev[i];
 			}
 
-			// if all devices have 0 work or num work < num device
+
+
+			// if all devices have 0 work or num work < num device or not enough work allocated
 			size_t ctct=0;
 			while(ct < totWrk)
 			{
@@ -389,12 +423,6 @@ namespace LoadBalanceLib
 				ct+=fields->grainDev[i];
 
 			}
-
-
-
-			if(fields->ns.size()>5)
-				fields->ns.erase(fields->ns.begin());
-
 
 
 
@@ -431,7 +459,7 @@ namespace LoadBalanceLib
 					}
 				}
 			}
-			fields->ns.push_back(elapsedTotal);
+			return elapsedTotal;
 
 		}
 
@@ -449,6 +477,7 @@ namespace LoadBalanceLib
 		}
 	private:
 		std::shared_ptr<FieldBlock<State, GrainState>> fields;
+		int runCount;
 	};
 
 }
