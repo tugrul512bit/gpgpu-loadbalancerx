@@ -16,7 +16,7 @@ What can device state have?
 - Object instance that holds I/O arrays for a GPU/FPGA/another CPU or even some network comm that offloads to a server
 - Anything that needs some temporary state (to be used for grain computation)
 
-How does it work?
+How does it work? (wiki: https://github.com/tugrul512bit/gpgpu-loadbalancerx/wiki)
 - User adds devices with state objects or values
 - User adds work grains to be repeated in each run() call
 - Load balancer creates 1 dedicated CPU thread for each device
