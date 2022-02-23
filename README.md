@@ -1,9 +1,9 @@
 # gpgpu-loadbalancerx
 Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). 
 
-On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 150 microseconds(for FX8150 CPU + 7 devices) so the grains that are sent to devices should be taking enough time to benefit from run-time minimization optimization and number of grains should be high enough to let load-balancing trade enough grains between devices to minimize run-time. 
+On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 50 microseconds(for FX8150 CPU + 6 devices) and the grains that are sent to devices should be taking at least comparable time (to the API overhead) to benefit from run-time minimization optimization and number of grains should be high enough to let load-balancing trade enough grains between devices to minimize run-time. 
 	
-What can grain state be and what can grain do?
+What can grain state be and what should a grain do?
 - Computation kernel for single 16x16 tile of an image, to be processed by 256 CUDA threads + its data transmissions over PCI-e
 - Sending work to another computer and waiting for response by any means
 - Anything that can be run in serial or parallel as long as it completes its own task within its scope
