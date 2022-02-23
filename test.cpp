@@ -104,8 +104,10 @@ int main() {
 
 		for(int i=0;i<20;i++)
 		{
-			LoadBalanceLib::Bench bench(&nano);
-			lb.run();
+			{
+				LoadBalanceLib::Bench bench(&nano);
+				lb.run();
+			}
 			std::cout<<nano<<"ns"<<std::endl;
 			std::cout<<"performance ratios:"<<std::endl;
 			auto performances = lb.getRelativePerformancesOfDevices();
