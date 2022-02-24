@@ -16,6 +16,7 @@
 #include<mutex>
 #include<condition_variable>
 #include<map>
+#include<queue>
 
 namespace LoadBalanceLib
 {
@@ -134,6 +135,51 @@ namespace LoadBalanceLib
 		State state;
 	};
 
+	class Load
+	{
+	public:
+		int cmd; // 0:stop running, 1:compute
+		size_t start;
+		size_t grain;
+
+	};
+
+	class Response
+	{
+	public:
+		int msg;
+	};
+
+	// thread-safe queue
+	template<typename T, int sz>
+	class ThreadsafeQueue
+	{
+	public:
+		ThreadsafeQueue(){}
+		void push(T t)
+		{
+			std::unique_lock<std::mutex> lc(m);
+			q.push(t);
+			c.notify_one();
+		}
+
+		T pop()
+		{
+			std::unique_lock<std::mutex> lc(m);
+			while(q.empty())
+			{
+				c.wait(lc);
+			}
+			T result = q.front();
+			q.pop();
+			return result;
+		}
+	private:
+		std::queue<T> q;
+		std::mutex m;
+		std::condition_variable c;
+	};
+
 	template
 	<typename State, typename GrainState>
 	class FieldBlock
@@ -154,7 +200,12 @@ namespace LoadBalanceLib
 		std::shared_ptr<std::mutex> mutGlobal;
 		bool initialized;
 		std::vector<std::shared_ptr<std::condition_variable>> cond;
+		std::vector<std::shared_ptr<ThreadsafeQueue<Load,    100>>> loadQueue;
+		std::vector<std::shared_ptr<ThreadsafeQueue<Response,100>>> responseQueue;
 	};
+
+
+
 
 	// GPGPU load balancing tool
 	// distributes work between different graphics cards
@@ -176,30 +227,12 @@ namespace LoadBalanceLib
 
 			for(size_t i=0; i<fields->thr.size(); i++)
 			{
-
-				{
-					std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
-					fields->running[i]=false;
-					fields->initialized=true;
-					fields->hasWork[i]=false;
-				}
-
-				{
-
-					std::unique_lock<std::mutex> lg(*(fields->mut[i]));
-					fields->running[i]=false;
-					fields->initialized=true;
-					fields->hasWork[i]=false;
-				}
-
+				fields->loadQueue[i]->push(Load({0,0,0}));
 			}
 
 			for(size_t i=0; i<fields->thr.size(); i++)
 			{
-
-				fields->cond[i]->notify_one();
 				fields->thr[i].join();
-
 			}
 		}
 
@@ -214,7 +247,8 @@ namespace LoadBalanceLib
 			{
 				std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
 				fields->initialized=false;
-
+				fields->loadQueue.push_back(    std::make_shared<ThreadsafeQueue<Load,    100>>());
+				fields->responseQueue.push_back(std::make_shared<ThreadsafeQueue<Response,100>>());
 				indexThr = fields->thr.size();
 
 				fields->mut.push_back(std::make_shared<std::mutex>());
@@ -256,33 +290,28 @@ namespace LoadBalanceLib
 					}
 				}
 
-				bool globalSyncDone = false;
+
 				while(isRunning)
 				{
 
 
-					if(globalSyncDone)
+					Load load = fields->loadQueue[indexThr]->pop();
+					if(load.cmd>0)
 					{
-						std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
-						isRunning = fields->running[indexThr];
-						hasWrk = fields->hasWork[indexThr];
-						start = fields->startDev[indexThr];
-						grain = fields->grainDev[indexThr];
+						start = load.start;
+						grain = load.grain;
+						hasWrk=true;
 					}
-					else
+					else if(load.cmd==0)
 					{
-						std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
-						globalSyncDone=true;
-						isRunning = fields->running[indexThr];
-						hasWrk = fields->hasWork[indexThr];
-						start = fields->startDev[indexThr];
-						grain = fields->grainDev[indexThr];
+						isRunning=false;
+						hasWrk=false;
 					}
 
 
-
-					if(hasWrk)
+					if(hasWrk && isRunning)
 					{
+						hasWrk=false;
 						// compute grain
 						size_t elapsedDevice;
 						{
@@ -322,23 +351,9 @@ namespace LoadBalanceLib
 							}
 						}
 
-						{
-							std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
-							fields->workComplete[indexThr]=true;
-							fields->hasWork[indexThr]=false;
-							fields->nsDev[indexThr]=elapsedDevice;
-							fields->cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
-						}
-
-					}
-					else
-					{
-						std::unique_lock<std::mutex> lg(*(fields->mut[indexThr]));
-						fields->workComplete[indexThr]=true;
-						fields->hasWork[indexThr]=false;
-						fields->cond[indexThr]->wait_for(lg,std::chrono::microseconds(1000));
 					}
 
+					fields->responseQueue[indexThr]->push(Response({1}));
 				}
 
 			}));
@@ -425,7 +440,6 @@ namespace LoadBalanceLib
 			}
 
 
-
 			size_t elapsedTotal;
 			{
 				Bench bench(&elapsedTotal);
@@ -436,10 +450,8 @@ namespace LoadBalanceLib
 
 					if(fields->grainDev[i]>0)
 					{
-						std::unique_lock<std::mutex> lg(*(fields->mut[i]));
-						fields->hasWork[i]=true;
-						fields->workComplete[i]=false;
-						fields->cond[i]->notify_one();
+						fields->loadQueue[i]->push(Load({1,fields->startDev[i],fields->grainDev[i]}));
+
 					}
 				}
 
@@ -448,13 +460,10 @@ namespace LoadBalanceLib
 					if(fields->grainDev[i]>0)
 					{
 
-						bool finish = false;
-						while(!finish)
+						Response response = fields->responseQueue[i]->pop();
+						if(response.msg==0)
 						{
-							fields->cond[i]->notify_one();
-							std::unique_lock<std::mutex> lg(*(fields->mut[i]));
-							finish = fields->workComplete[i];
-							std::this_thread::yield();
+							std::cout<<"Error: compute failed in device-"<<i<<std::endl;
 						}
 					}
 				}
