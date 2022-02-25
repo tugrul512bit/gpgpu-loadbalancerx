@@ -1,5 +1,5 @@
 # gpgpu-loadbalancerx
-Simple (![vectorAdd.cu](https://github.com/tugrul512bit/gpgpu-loadbalancerx/wiki/vectorAdd.cu-Example-With-Streams-and-Pinned-Host-Array)) load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). 
+Simple load-balancing library for balancing (gpugpu-type or other) workloads between gpus (or any devices) in a computer (or multiple computers if it is a cluster). "Hello-world" version with CUDA: ![vectorAdd.cu](https://github.com/tugrul512bit/gpgpu-loadbalancerx/wiki/vectorAdd.cu-Example-With-Streams-and-Pinned-Host-Array)
 
 On each run() call from LoadBalancerX instance, the work distribution becomes more fair (the faster GPU/CPU gets more work). API-overhead per run call is less than 50 microseconds(for FX8150 CPU + 6 devices) and the grains that are sent to devices should be taking at least comparable time (to the API overhead) to benefit from run-time minimization optimization and number of grains should be high enough to let load-balancing trade enough grains between devices to minimize run-time. 
 	
