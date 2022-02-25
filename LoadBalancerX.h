@@ -148,6 +148,7 @@ namespace LoadBalanceLib
 	{
 	public:
 		int msg;
+		size_t ns;
 	};
 
 	// thread-safe queue
@@ -350,10 +351,10 @@ namespace LoadBalanceLib
 								}
 							}
 						}
-
+						fields->responseQueue[indexThr]->push(Response({1,elapsedDevice}));
 					}
 
-					fields->responseQueue[indexThr]->push(Response({1}));
+
 				}
 
 			}));
@@ -401,7 +402,7 @@ namespace LoadBalanceLib
 			size_t ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+
 				fields->performances[i]/=totPerf;
 
 				// smoothing the performance measurement
@@ -425,7 +426,7 @@ namespace LoadBalanceLib
 			size_t ctct=0;
 			while(ct < totWrk)
 			{
-				std::unique_lock<std::mutex> lg(*(fields->mut[ctct%totDev]));
+
 				fields->grainDev[ctct%totDev]++;
 				ct++;ctct++;
 			}
@@ -433,7 +434,7 @@ namespace LoadBalanceLib
 			ct=0;
 			for(size_t i=0;i<totDev;i++)
 			{
-				std::unique_lock<std::mutex> lg(*(fields->mut[i]));
+
 				fields->startDev[i]=ct;
 				ct+=fields->grainDev[i];
 
@@ -465,6 +466,7 @@ namespace LoadBalanceLib
 						{
 							std::cout<<"Error: compute failed in device-"<<i<<std::endl;
 						}
+						fields->nsDev[i]=response.ns;
 					}
 				}
 			}
