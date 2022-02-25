@@ -17,6 +17,7 @@
 #include<condition_variable>
 #include<map>
 #include<queue>
+#include<iostream>
 
 namespace LoadBalanceLib
 {
