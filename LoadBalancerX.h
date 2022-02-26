@@ -142,7 +142,7 @@ namespace LoadBalanceLib
 		int cmd; // 0:stop running, 1:compute
 		size_t start;
 		size_t grain;
-
+		bool pipelined;
 	};
 
 	class Response
@@ -280,6 +280,7 @@ namespace LoadBalanceLib
 				bool isRunning = true;
 				bool hasWrk = false;
 				bool init=false;
+				bool pipelined=false;
 				size_t start = 0;
 				size_t grain = 0;
 
@@ -302,6 +303,7 @@ namespace LoadBalanceLib
 					{
 						start = load.start;
 						grain = load.grain;
+						pipelined=load.pipelined;
 						hasWrk=true;
 					}
 					else if(load.cmd==0)
@@ -331,19 +333,48 @@ namespace LoadBalanceLib
 									}
 								}
 
-								for(size_t j=first; j<last; j++)
+								if(!pipelined || grain>=3)
 								{
-									fields->totalWork[j].input(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
-								}
 
-								for(size_t j=first; j<last; j++)
-								{
-									fields->totalWork[j].compute(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
-								}
 
-								for(size_t j=first; j<last; j++)
+									for(size_t j=first; j<last; j++)
+									{
+										fields->totalWork[j].input(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+									}
+
+									for(size_t j=first; j<last; j++)
+									{
+										fields->totalWork[j].compute(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+									}
+
+									for(size_t j=first; j<last; j++)
+									{
+										fields->totalWork[j].output(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+									}
+
+
+								}
+								else
 								{
-									fields->totalWork[j].output(state, fields->totalWork[j].refGrainState()); // user should have asynchronous launch in this
+									// 3-way concurrency by pipelining methods
+									// input 1 input 2     input 3
+									//         compute 1   compute 2   compute 3
+									//                     output 1    output 2     output 3
+
+									const size_t first = start+2;
+									const size_t last = first+grain-2;
+									fields->totalWork[start].input(state, fields->totalWork[start].refGrainState());
+									fields->totalWork[start+1].input(state, fields->totalWork[start+1].refGrainState());
+									fields->totalWork[start].compute(state, fields->totalWork[start].refGrainState());
+									for(size_t j=first;j<last;j++)
+									{
+										fields->totalWork[j].input(state, fields->totalWork[j].refGrainState());
+										fields->totalWork[j-1].compute(state, fields->totalWork[j-1].refGrainState());
+										fields->totalWork[j-2].output(state, fields->totalWork[j-2].refGrainState());
+									}
+									fields->totalWork[last-1].compute(state, fields->totalWork[last-1].refGrainState());
+									fields->totalWork[last-2].output(state, fields->totalWork[last-2].refGrainState());
+									fields->totalWork[last-1].output(state, fields->totalWork[last-1].refGrainState());
 								}
 
 								for(size_t j=first; j<last; j++)
@@ -361,8 +392,10 @@ namespace LoadBalanceLib
 			}));
 		}
 
-		// returns elapsed time in nanoseconds (this is minimized by load-balancer)
-		size_t run()
+		/* returns elapsed time in nanoseconds (this is minimized by load-balancer)
+		* pipelined: uses 3-way concurrency in launch pattern of input/compute/output/sync methods for supporting any CUDA/OpenCL-like efficient stream overlapping
+		*/
+		size_t run(bool pipelined = false)
 		{
 
 			{
@@ -452,7 +485,7 @@ namespace LoadBalanceLib
 
 					if(fields->grainDev[i]>0)
 					{
-						fields->loadQueue[i]->push(Load({1,fields->startDev[i],fields->grainDev[i]}));
+						fields->loadQueue[i]->push(Load({1,fields->startDev[i],fields->grainDev[i],pipelined}));
 
 					}
 				}
