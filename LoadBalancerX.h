@@ -333,7 +333,7 @@ namespace LoadBalanceLib
 									}
 								}
 
-								if(!pipelined || grain>=3)
+								if(!pipelined || grain<3)
 								{
 
 
