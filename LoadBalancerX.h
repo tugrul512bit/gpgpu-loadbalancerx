@@ -98,7 +98,10 @@ namespace LoadBalanceLib
 		void makeReady(int deviceIndex){ initialized[deviceIndex]=true; }
 
 		GrainState& refGrainState (){ return grainState; }
-	private:
+
+
+
+	//private:
 		// called once per lifetime of loadbalancerx per device
 		std::function<void(State, GrainState&)> workInit;
 
@@ -122,6 +125,7 @@ namespace LoadBalanceLib
 		std::map<int,bool> initialized;
 
 		GrainState grainState;
+		std::chrono::nanoseconds t1,t2;
 	};
 
 	template
@@ -136,6 +140,7 @@ namespace LoadBalanceLib
 		State state;
 	};
 
+	template<typename GrainOfWork>
 	class Load
 	{
 	public:
@@ -143,6 +148,7 @@ namespace LoadBalanceLib
 		size_t start;
 		size_t grain;
 		bool pipelined;
+		GrainOfWork grainInfo;
 	};
 
 	class Response
@@ -163,6 +169,12 @@ namespace LoadBalanceLib
 			std::unique_lock<std::mutex> lc(m);
 			q.push(t);
 			c.notify_one();
+		}
+
+		size_t size()
+		{
+			std::unique_lock<std::mutex> lc(m);
+			return q.size();
 		}
 
 		T pop()
@@ -187,8 +199,13 @@ namespace LoadBalanceLib
 	class FieldBlock
 	{
 	public:
+		FieldBlock():initialized(false)
+		{
+
+		}
 		std::vector<ComputeDevice<State>> devices;
 		std::vector<GrainOfWork<State, GrainState>> totalWork;
+
 		std::vector<double> performancesHistory;
 		std::vector<size_t> nsDev;
 		std::vector<size_t> grainDev;
@@ -202,11 +219,43 @@ namespace LoadBalanceLib
 		std::shared_ptr<std::mutex> mutGlobal;
 		bool initialized;
 		std::vector<std::shared_ptr<std::condition_variable>> cond;
-		std::vector<std::shared_ptr<ThreadsafeQueue<Load,    100>>> loadQueue;
+		std::vector<std::shared_ptr<ThreadsafeQueue<Load<GrainOfWork<State,GrainState>>,    100>>> loadQueue;
 		std::vector<std::shared_ptr<ThreadsafeQueue<Response,100>>> responseQueue;
 	};
 
 
+    template
+    <typename DeviceState, typename GrainState>
+    class GrainCache
+    {
+    public:
+    	GrainOfWork<DeviceState, GrainState> getGrain(	size_t id,
+    							std::function<void(DeviceState, GrainState&)> init,
+    							std::function<void(DeviceState, GrainState&)> input,
+    							std::function<void(DeviceState, GrainState&)> compute,
+    							std::function<void(DeviceState, GrainState&)> output,
+    							std::function<void(DeviceState, GrainState&)> sync
+    							)
+    	{
+    		auto it = grains.find(id);
+    		if(it!=grains.end())
+    		{
+    			it->second.workInit=init;
+    			it->second.workInput=input;
+    			it->second.workCompute=compute;
+    			it->second.workOutput=output;
+    			it->second.workSync=sync;
+    			return it->second;
+    		}
+    		else
+    		{
+    			grains[id]=GrainOfWork<DeviceState, GrainState>(init,input,compute,output,sync);
+    		}
+    		return grains.at(id);
+    	}
+    private:
+    	std::map<size_t,GrainOfWork<DeviceState, GrainState>> grains;
+    };
 
 
 	// GPGPU load balancing tool
@@ -229,7 +278,7 @@ namespace LoadBalanceLib
 
 			for(size_t i=0; i<fields->thr.size(); i++)
 			{
-				fields->loadQueue[i]->push(Load({0,0,0}));
+				fields->loadQueue[i]->push(Load<GrainOfWork<State,GrainState>>({0,0,0}));
 			}
 
 			for(size_t i=0; i<fields->thr.size(); i++)
@@ -249,7 +298,7 @@ namespace LoadBalanceLib
 			{
 				std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
 				fields->initialized=false;
-				fields->loadQueue.push_back(    std::make_shared<ThreadsafeQueue<Load,    100>>());
+				fields->loadQueue.push_back(    std::make_shared<ThreadsafeQueue<Load<GrainOfWork<State,GrainState>>,    100>>());
 				fields->responseQueue.push_back(std::make_shared<ThreadsafeQueue<Response,100>>());
 				indexThr = fields->thr.size();
 
@@ -298,12 +347,52 @@ namespace LoadBalanceLib
 				{
 
 
-					Load load = fields->loadQueue[indexThr]->pop();
+					Load<GrainOfWork<State,GrainState>> load = fields->loadQueue[indexThr]->pop();
 					if(load.cmd>0)
 					{
 						start = load.start;
 						grain = load.grain;
 						pipelined=load.pipelined;
+
+						// single work sync request
+						if(load.cmd==3)
+						{
+
+							GrainOfWork<State,GrainState> grainInfo = load.grainInfo;
+							grainInfo.sync(state, grainInfo.refGrainState()); // user must synchronize in this unless it is synchronized in other methods
+							grainInfo.t2=std::chrono::duration_cast< std::chrono::nanoseconds >(std::chrono::high_resolution_clock::now().time_since_epoch());
+							fields->responseQueue[indexThr]->push(Response({1,grainInfo.t2.count()-grainInfo.t1.count()}));
+						}
+
+						// single work request
+						if(load.cmd==2)
+						{
+
+							size_t elapsedDevice = 0;
+							{
+
+								start = load.start;
+								grain = load.grain; // 1
+								GrainOfWork<State,GrainState> grainInfo = load.grainInfo;
+								grainInfo.t1=std::chrono::duration_cast< std::chrono::nanoseconds >(std::chrono::high_resolution_clock::now().time_since_epoch());
+								if(!grainInfo.isReady(indexThr))
+								{
+									grainInfo.init(state, grainInfo.refGrainState()); // user should have asynchronous launch in this
+									grainInfo.makeReady(indexThr);
+								}
+								grainInfo.input(state, grainInfo.refGrainState()); // user should have asynchronous launch in this
+								grainInfo.compute(state, grainInfo.refGrainState()); // user should have asynchronous launch in this
+								grainInfo.output(state, grainInfo.refGrainState()); // user should have asynchronous launch in this
+
+								// creates a self-sync command at the end of queue (to let others run asynchronously)
+								fields->loadQueue[indexThr]->push(Load<GrainOfWork<State,GrainState>>({3,0,0,false,grainInfo}));
+							}
+
+
+
+							continue;
+						}
+
 						hasWrk=true;
 					}
 					else if(load.cmd==0)
@@ -390,6 +479,54 @@ namespace LoadBalanceLib
 				}
 
 			}));
+		}
+
+
+
+
+		size_t runSingleAsync(GrainOfWork<State, GrainState> grain)
+		{
+			{
+				std::unique_lock<std::mutex> lg(*(fields->mutGlobal));
+				fields->initialized=true;
+			}
+
+			const size_t totDev = fields->devices.size();
+
+			unsigned int szMin = ((unsigned int)0)-1;
+			int iMin = -1;
+
+			bool space = false;
+			while(!space)
+			{
+				for(size_t i=0; i<totDev; i++)
+				{
+					int sel=fields->loadQueue[i]->size();
+					if(szMin>sel && sel<25)
+					{
+						szMin=sel;
+						iMin=i;
+						space=true;
+					}
+				}
+			}
+
+
+			fields->loadQueue[iMin]->push(Load<GrainOfWork<State,GrainState>>({2,0,0,false,grain}));
+
+			return iMin;
+		}
+
+		// returns latency of grain's operation from being acquired by dedicated device thread to being sent to synchronization queue
+		// most of this latency can be hidden behind other grains' operations
+		size_t syncSingle(size_t id)
+		{
+			Response response = fields->responseQueue[id]->pop();
+			if(response.msg==0)
+			{
+				std::cout<<"Error: compute failed in device-"<<id<<std::endl;
+			}
+			return response.ns;
 		}
 
 		/* returns elapsed time in nanoseconds (this is minimized by load-balancer)
@@ -485,7 +622,7 @@ namespace LoadBalanceLib
 
 					if(fields->grainDev[i]>0)
 					{
-						fields->loadQueue[i]->push(Load({1,fields->startDev[i],fields->grainDev[i],pipelined}));
+						fields->loadQueue[i]->push(Load<GrainOfWork<State,GrainState>>({1,fields->startDev[i],fields->grainDev[i],pipelined}));
 
 					}
 				}
